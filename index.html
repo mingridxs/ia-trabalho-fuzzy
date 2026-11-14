@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulador Fuzzy Mamdani — Tempo de Irrigação</title>
+  <meta name="description" content="Simulador de um sistema fuzzy Mamdani que recomenda o tempo de irrigação a partir da umidade do solo e da temperatura.">
+  <meta name="theme-color" content="#0f2f3a">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <script>
+    // Define o tema antes de desenhar a página: escolha salva ou preferência do sistema.
+    (function () {
+      var tema = null;
+      try { tema = localStorage.getItem('tema'); } catch (e) {}
+      if (tema !== 'claro' && tema !== 'escuro') {
+        tema = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro';
+      }
+      document.documentElement.dataset.tema = tema;
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">
+      <img src="favicon.svg" alt="" width="44" height="44">
+      <div>
+        <h1>Simulador Fuzzy Mamdani</h1>
+        <p>Tempo de irrigação a partir da umidade do solo e da temperatura · Inteligência Artificial · UFPI 2026.2</p>
+      </div>
+    </div>
+    <div class="acoes-topo">
+      <button type="button" id="btnTema" class="botao-topo" aria-pressed="false">🌙 Modo noturno</button>
+      <a class="botao-topo" href="https://github.com/mingridxs/ia-trabalho-fuzzy" target="_blank" rel="noopener">Código-fonte no GitHub</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="topo-grade">
+      <section class="cartao" id="secEntradas">
+        <h2>Entradas e configuração</h2>
+        <div class="entradas">
+          <div class="campo">
+            <label for="umidade">Umidade do solo (U), de 0 a 100 %</label>
+            <div class="linha">
+              <input id="umidade" type="text" inputmode="decimal" value="35" autocomplete="off">
+              <span class="un">%</span>
+              <input id="umidadeDesl" type="range" min="0" max="100" step="1" value="35" aria-label="Umidade do solo (controle deslizante)">
+            </div>
+          </div>
+          <div class="campo">
+            <label for="temperatura">Temperatura (T), de 10 a 40 °C</label>
+            <div class="linha">
+              <input id="temperatura" type="text" inputmode="decimal" value="30" autocomplete="off">
+              <span class="un">°C</span>
+              <input id="temperaturaDesl" type="range" min="10" max="40" step="0.5" value="30" aria-label="Temperatura (controle deslizante)">
+            </div>
+          </div>
+          <div class="campo">
+            <label for="passo">Passo de defuzzificação (Δz)</label>
+            <div class="linha">
+              <select id="passo">
+                <option value="0.1" selected>0,1 minuto</option>
+                <option value="0.05">0,05 minuto</option>
+                <option value="0.01">0,01 minuto</option>
+              </select>
+            </div>
+            <small>Centroide por pontos médios em todas as opções.</small>
+          </div>
+        </div>
+        <div class="controles">
+          <button type="button" id="btnCalcular">Calcular</button>
+          <button type="button" id="btnAvancar">Avançar etapa</button>
+          <button type="button" id="btnRestaurar" class="secundario">↺ Restaurar padrão</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+        <ul id="erros" class="erros" role="alert"></ul>
+        <p class="dica" style="margin-top:10px">Os consequentes das nove regras são escolhidos na tabela "Base de regras". Qualquer alteração limpa os resultados e reinicia a sequência de etapas.</p>
+      </section>
+
+      <div class="lateral">
+        <section class="cartao resultado" aria-live="polite">
+          <h2>Tempo de irrigação recomendado</h2>
+          <div id="tempo" class="valor vazio">—</div>
+          <p id="tempoDetalhe" class="detalhe">Ainda não calculado.</p>
+        </section>
+        <section class="cartao">
+          <h2>Etapas da inferência</h2>
+          <ol id="etapas" class="etapas">
+            <li><span class="n">1</span> Fuzzificação</li>
+            <li><span class="n">2</span> Avaliação das regras (mínimo)</li>
+            <li><span class="n">3</span> Implicação (recorte)</li>
+            <li><span class="n">4</span> Agregação (máximo)</li>
+            <li><span class="n">5</span> Defuzzificação (centroide)</li>
+          </ol>
+        </section>
+      </div>
+    </div>
+
+    <div class="colunas">
+      <section class="cartao">
+        <h2>Umidade do solo <span class="selo">Etapa 1</span></h2>
+        <canvas id="grafUmidade" height="250"></canvas>
+        <table class="dados graus" id="grausUmidade">
+          <thead><tr><th>Conjunto</th><th>Grau de pertinência</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+      <section class="cartao">
+        <h2>Temperatura <span class="selo">Etapa 1</span></h2>
+        <canvas id="grafTemperatura" height="250"></canvas>
+        <table class="dados graus" id="grausTemperatura">
+          <thead><tr><th>Conjunto</th><th>Grau de pertinência</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+    <p class="dica" style="margin:-6px 4px 0">Um grau de pertinência indica a compatibilidade do valor com o termo linguístico. Não é uma probabilidade, e os graus não precisam somar 1.</p>
+
+    <div class="colunas">
+      <section class="cartao">
+        <h2>Base de regras <span class="selo">Etapa 2</span></h2>
+        <p class="dica">As regras ativadas ficam destacadas. Toque em uma regra para ver o recorte do consequente ao lado.</p>
+        <div class="rolagem">
+          <table class="dados" id="tabRegras">
+            <thead><tr><th>Regra</th><th>SE solo E temperatura</th><th>ENTÃO tempo</th><th>h = mín(μ solo; μ temp.)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="cartao">
+        <h2>Implicação da regra selecionada <span class="selo">Etapa 3</span></h2>
+        <label class="inline">Regra
+          <select id="regraSel"></select>
+        </label>
+        <canvas id="grafRegra" height="250"></canvas>
+        <p class="legenda-graf"><span>- - - consequente original</span> <span>■ recorte produzido pela implicação</span></p>
+        <p id="txtRegra" class="explica pendente"></p>
+      </section>
+    </div>
+
+    <div class="colunas">
+      <section class="cartao">
+        <h2>Saída: tempo de irrigação <span class="selo">Etapas 3 a 5</span></h2>
+        <canvas id="grafSaida" height="280"></canvas>
+        <p class="legenda-graf">
+          <span><i class="cor c1"></i>curto</span> <span><i class="cor c2"></i>médio</span> <span><i class="cor c3"></i>longo</span>
+          <span><i class="cor agg"></i>região agregada (máximo dos recortes)</span> <span><i class="cor cen"></i>centroide</span>
+        </p>
+        <p id="txtSaida" class="explica pendente"></p>
+      </section>
+      <section class="cartao">
+        <h2>Log das etapas</h2>
+        <pre id="log" class="log"></pre>
+        <p id="logVazio" class="dica">O log é preenchido conforme as etapas são executadas.</p>
+      </section>
+    </div>
+
+    <section class="cartao">
+      <h2>Testes de validação (seção 6 do enunciado)</h2>
+      <p class="dica">Roda os testes 6.1 a 6.5 com as mesmas funções usadas pelo simulador, sem alterar a tela.</p>
+      <button type="button" id="btnTestes" class="secundario">Executar testes</button>
+      <pre id="saidaTestes" class="log"></pre>
+    </section>
+  </main>
+
+  <footer>
+    <p>Autores: Maria Ingrid Xavier Sousa e Carlos Henrique Reis Portela Leal · Atividade prática de Sistemas Fuzzy · UFPI</p>
+  </footer>
+
+  <script src="fuzzy.js?v=1"></script>
+  <script src="testes.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
